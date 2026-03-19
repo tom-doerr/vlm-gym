@@ -7,7 +7,7 @@ from pathlib import Path
 import dspy
 from PIL import Image
 
-from vlm_gym.envs import make_env, render_to_pil
+from vlm_gym.envs import make_env, render_to_pil, GameDisplay
 
 
 class GameAction(dspy.Signature):
@@ -70,7 +70,8 @@ class VLMAgent:
             action = min(valid, key=lambda a: abs(a - action))
         return action, result.reasoning
 
-    def run_episode(self, env_name, max_steps=None, save_dir=None, verbose=True):
+    def run_episode(self, env_name, max_steps=None, save_dir=None,
+                    verbose=True, display=True):
         """Run one episode. Returns result dict."""
         env, config = make_env(env_name)
         max_steps = max_steps or config["max_steps"]
@@ -78,12 +79,15 @@ class VLMAgent:
         obs, info = env.reset()
         history, total_reward = [], 0.0
         start = time.time()
+        disp = GameDisplay(title=f"VLM-Gym: {env_name}") if display else None
         if verbose:
             print(f"\n{'='*50}")
             print(f"Episode: {env_name} | Goal: {config['goal']}")
             print(f"{'='*50}\n")
         for step in range(max_steps):
             frame = render_to_pil(env)
+            if disp:
+                disp.update(frame)
             t0 = time.time()
             action, reasoning = self.act(
                 frame, config["goal"], action_space, history
@@ -115,6 +119,8 @@ class VLMAgent:
                   f"reward={total_reward:+.1f}, {elapsed:.1f}s")
         if save_dir:
             self._save_log(result, save_dir, env_name, start)
+        if disp:
+            disp.close()
         env.close()
         return result
 

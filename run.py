@@ -3,14 +3,15 @@
 
 import argparse
 from vlm_gym.agent import VLMAgent
-from vlm_gym.envs import ENV_CONFIGS
+from vlm_gym.envs import ENV_CONFIGS, detect_model
 
 
 def main():
     p = argparse.ArgumentParser(description="VLM plays Gym")
     p.add_argument("--env", default="cartpole",
                     choices=list(ENV_CONFIGS.keys()))
-    p.add_argument("--model", default="openai/Qwen3-VL-30B-FP8")
+    p.add_argument("--model", default=None,
+                    help="auto-detected from endpoint if omitted")
     p.add_argument("--api-base",
                     default="http://192.168.110.2:8000/v1")
     p.add_argument("--api-key", default="none")
@@ -18,10 +19,17 @@ def main():
     p.add_argument("--max-steps", type=int, default=None)
     p.add_argument("--temperature", type=float, default=0.7)
     p.add_argument("--save-dir", default="episodes")
+    p.add_argument("--no-display", action="store_true",
+                    help="disable live pygame window")
     args = p.parse_args()
 
+    model = args.model
+    if model is None:
+        model = "openai/" + detect_model(args.api_base)
+        print(f"Auto-detected model: {model}")
+
     agent = VLMAgent(
-        model=args.model, api_base=args.api_base,
+        model=model, api_base=args.api_base,
         api_key=args.api_key, temperature=args.temperature,
     )
     for ep in range(args.episodes):
@@ -30,6 +38,7 @@ def main():
         agent.run_episode(
             args.env, max_steps=args.max_steps,
             save_dir=args.save_dir,
+            display=not args.no_display,
         )
 
 

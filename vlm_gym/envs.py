@@ -2,7 +2,23 @@
 
 import gymnasium as gym
 import numpy as np
+import requests
 from PIL import Image
+
+
+def detect_model(api_base: str) -> str:
+    """Query the /v1/models endpoint and return the first model ID."""
+    url = api_base.rstrip("/")
+    if url.endswith("/v1"):
+        url = url + "/models"
+    else:
+        url = url + "/v1/models"
+    resp = requests.get(url, timeout=5)
+    resp.raise_for_status()
+    models = resp.json()["data"]
+    if not models:
+        raise RuntimeError(f"No models found at {url}")
+    return models[0]["id"]
 
 
 ENV_CONFIGS = {
@@ -46,3 +62,23 @@ def render_to_pil(env: gym.Env, scale: float = 0.5) -> Image.Image:
         new_size = (int(img.width * scale), int(img.height * scale))
         img = img.resize(new_size, Image.LANCZOS)
     return img
+
+
+class GameDisplay:
+    """Live OpenCV window showing the game frame."""
+
+    def __init__(self, width=600, height=400, title="VLM-Gym"):
+        import cv2
+        self.cv2 = cv2
+        self.title = title
+        self.size = (width, height)
+
+    def update(self, pil_img):
+        frame = np.array(pil_img)
+        frame = self.cv2.cvtColor(frame, self.cv2.COLOR_RGB2BGR)
+        frame = self.cv2.resize(frame, self.size)
+        self.cv2.imshow(self.title, frame)
+        self.cv2.waitKey(1)
+
+    def close(self):
+        self.cv2.destroyAllWindows()
