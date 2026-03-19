@@ -1,0 +1,28 @@
+{
+  "predict_action": {
+    "traces": [],
+    "train": [],
+    "demos": [],
+    "signature": {
+      "instructions": "Analyze the provided game screenshot of the CartPole environment. Identify the current state of the pole and cart. Based on this visual information, determine the single best discrete action to keep the pole balanced. Output the action as an integer: 0 if the cart should move left, or 1 if the cart should move right.",
+      "fields": [
+        {
+          "prefix": "Frame:",
+          "description": "game screenshot"
+        },
+        {
+          "prefix": "Action:",
+          "description": "action index"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "metadata": {
+    "dependency_versions": {
+      "python": "3.12",
+      "dspy": "3.1.3",
+      "cloudpickle": "3.1"
+    }
+  }
+}

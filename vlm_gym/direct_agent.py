@@ -9,7 +9,7 @@ from pathlib import Path
 import requests
 from PIL import Image
 
-from vlm_gym.envs import make_env, render_to_pil, GameDisplay
+from vlm_gym.envs import make_env, render_to_pil, GameDisplay, save_video
 
 
 def pil_to_data_uri(img: Image.Image) -> str:
@@ -31,26 +31,27 @@ class DirectAgent:
         self.session = requests.Session()
         self.session.headers["Authorization"] = f"Bearer {api_key}"
 
-    def _build_prompt(self, goal, action_space, history):
+    def _build_prompt(self, goal, action_space):
         acts = " ".join(f"{i}={d}" for i, d in action_space.items())
-        hist = ""
-        if history:
-            recent = history[-5:]
-            hist = " Last: " + ", ".join(
-                f"{h['action']}" for h in recent
-            )
         return (
-            f"Game: {goal} Actions: {acts}.{hist} "
+            f"Game: {goal} Actions: {acts}. "
+            f"3 frames shown oldest to newest. "
             f"Reply with ONLY the action number."
         )
 
-    def act(self, frame, goal, action_space, history):
-        prompt = self._build_prompt(goal, action_space, history)
-        data_uri = pil_to_data_uri(frame)
-        messages = [{"role": "user", "content": [
-            {"type": "image_url", "image_url": {"url": data_uri}},
-            {"type": "text", "text": prompt},
-        ]}]
+    def act(self, frames, goal, action_space):
+        """frames: list of 1-3 PIL images (oldest first)."""
+        prompt = self._build_prompt(goal, action_space)
+        content = []
+        labels = ["t-2", "t-1", "now"]
+        start = 3 - len(frames)
+        for i, f in enumerate(frames):
+            label = labels[start + i]
+            content.append({"type": "text", "text": f"[{label}]"})
+            content.append({"type": "image_url",
+                            "image_url": {"url": pil_to_data_uri(f)}})
+        content.append({"type": "text", "text": prompt})
+        messages = [{"role": "user", "content": content}]
         body = {
             "model": self.model, "messages": messages,
             "max_tokens": 1, "temperature": 0,
@@ -73,12 +74,15 @@ class DirectAgent:
         return action, tok
 
     def run_episode(self, env_name, max_steps=None,
-                    save_dir=None, verbose=True, display=True):
+                    save_dir=None, verbose=True, display=True,
+                    video_path=None):
         env, config = make_env(env_name)
         max_steps = max_steps or config["max_steps"]
         action_space = config["actions"]
         obs, info = env.reset()
         history, total_reward = [], 0.0
+        vid_frames = [] if video_path else None
+        frame_buf = []  # last 3 frames for velocity estimation
         start = time.time()
         disp = None
         if display:
@@ -88,12 +92,17 @@ class DirectAgent:
             print(f"[direct] {env_name} | {config['goal']}")
             print(f"{'='*50}\n")
         for step in range(max_steps):
-            frame = render_to_pil(env)
+            frame = render_to_pil(env, scale=1.0)
+            if vid_frames is not None:
+                vid_frames.append(frame.copy())
+            frame_buf.append(frame)
+            if len(frame_buf) > 3:
+                frame_buf.pop(0)
             if disp:
                 disp.update(frame)
             t0 = time.time()
             action, tok = self.act(
-                frame, config["goal"], action_space, history
+                frame_buf, config["goal"], action_space
             )
             dt = time.time() - t0
             obs, reward, term, trunc, info = env.step(action)
@@ -122,8 +131,13 @@ class DirectAgent:
                 "total_reward": total_reward,
                 "elapsed_seconds": elapsed, "history": history,
             }, indent=2, default=str))
+        if vid_frames and video_path:
+            save_video(vid_frames, video_path)
+            if verbose:
+                print(f"Video saved: {video_path}")
         if disp:
             disp.close()
         env.close()
         return {"env": env_name, "steps": len(history),
                 "total_reward": total_reward}
+

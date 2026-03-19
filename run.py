@@ -21,6 +21,8 @@ def main():
     p.add_argument("--no-display", action="store_true")
     p.add_argument("--direct", action="store_true",
                     help="single-token mode (no DSPy, min latency)")
+    p.add_argument("--no-video", action="store_true",
+                    help="disable automatic video recording")
     args = p.parse_args()
 
     raw_model = args.model or detect_model(args.api_base)
@@ -35,13 +37,20 @@ def main():
             "openai/" + raw_model, args.api_base,
             args.api_key, args.temperature,
         )
+    import time as _t
     for ep in range(args.episodes):
         if args.episodes > 1:
             print(f"\n--- Episode {ep+1}/{args.episodes} ---")
+        vpath = None
+        if not args.no_video:
+            from pathlib import Path
+            Path(args.save_dir).mkdir(parents=True, exist_ok=True)
+            vpath = f"{args.save_dir}/{args.env}_{int(_t.time())}.mp4"
         agent.run_episode(
             args.env, max_steps=args.max_steps,
             save_dir=args.save_dir,
             display=not args.no_display,
+            video_path=vpath,
         )
 
 

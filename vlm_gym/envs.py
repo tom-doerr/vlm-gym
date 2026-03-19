@@ -40,6 +40,16 @@ ENV_CONFIGS = {
         "goal": "Swing the free end of the two-link robot above the base.",
         "max_steps": 500,
     },
+    "carracing": {
+        "id": "CarRacing-v3",
+        "actions": {
+            0: "do NOTHING", 1: "steer LEFT",
+            2: "steer RIGHT", 3: "GAS", 4: "BRAKE",
+        },
+        "goal": "Drive the car around the track as fast as possible. Stay on the road.",
+        "max_steps": 1000,
+        "kwargs": {"continuous": False},
+    },
 }
 
 
@@ -50,7 +60,8 @@ def make_env(env_name: str) -> tuple[gym.Env, dict]:
             f"Unknown env '{env_name}'. Choose from: {list(ENV_CONFIGS.keys())}"
         )
     config = ENV_CONFIGS[env_name]
-    env = gym.make(config["id"], render_mode="rgb_array")
+    kwargs = config.get("kwargs", {})
+    env = gym.make(config["id"], render_mode="rgb_array", **kwargs)
     return env, config
 
 
@@ -84,3 +95,18 @@ class GameDisplay:
 
     def close(self):
         self.cv2.destroyAllWindows()
+
+
+def save_video(frames, path, fps=10):
+    """Save a list of PIL frames as an mp4 video."""
+    import cv2
+    f0 = np.array(frames[0])
+    h, w = f0.shape[:2]
+    out = cv2.VideoWriter(
+        str(path), cv2.VideoWriter_fourcc(*"mp4v"),
+        fps, (w, h),
+    )
+    for f in frames:
+        arr = np.array(f)
+        out.write(cv2.cvtColor(arr, cv2.COLOR_RGB2BGR))
+    out.release()
