@@ -68,6 +68,8 @@ class GameDisplay:
     """Live OpenCV window showing the game frame."""
 
     def __init__(self, width=600, height=400, title="VLM-Gym"):
+        import os
+        os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
         import cv2
         self.cv2 = cv2
         self.title = title

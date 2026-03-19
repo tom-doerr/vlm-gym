@@ -2,7 +2,6 @@
 """CLI entry point for VLM-Gym."""
 
 import argparse
-from vlm_gym.agent import VLMAgent
 from vlm_gym.envs import ENV_CONFIGS, detect_model
 
 
@@ -19,19 +18,23 @@ def main():
     p.add_argument("--max-steps", type=int, default=None)
     p.add_argument("--temperature", type=float, default=0.7)
     p.add_argument("--save-dir", default="episodes")
-    p.add_argument("--no-display", action="store_true",
-                    help="disable live pygame window")
+    p.add_argument("--no-display", action="store_true")
+    p.add_argument("--direct", action="store_true",
+                    help="single-token mode (no DSPy, min latency)")
     args = p.parse_args()
 
-    model = args.model
-    if model is None:
-        model = "openai/" + detect_model(args.api_base)
-        print(f"Auto-detected model: {model}")
+    raw_model = args.model or detect_model(args.api_base)
+    print(f"Model: {raw_model}")
 
-    agent = VLMAgent(
-        model=model, api_base=args.api_base,
-        api_key=args.api_key, temperature=args.temperature,
-    )
+    if args.direct:
+        from vlm_gym.direct_agent import DirectAgent
+        agent = DirectAgent(raw_model, args.api_base, args.api_key)
+    else:
+        from vlm_gym.agent import VLMAgent
+        agent = VLMAgent(
+            "openai/" + raw_model, args.api_base,
+            args.api_key, args.temperature,
+        )
     for ep in range(args.episodes):
         if args.episodes > 1:
             print(f"\n--- Episode {ep+1}/{args.episodes} ---")
