@@ -38,22 +38,50 @@ INITIAL_KNOWLEDGE = [
 ]
 
 
-def collect_rollout(env_name, n_steps=50):
-    """Play with heuristic, collect (frame_uri, good_action)."""
+def carracing_heuristic(obs):
+    """Steer toward road center, gas on straight."""
+    row = obs[66]
+    road = np.where(row[:, 1] > 100)[0]
+    if len(road) < 5:
+        return 3
+    center = (road[0] + road[-1]) / 2
+    if center < 42:
+        return 1
+    elif center > 54:
+        return 2
+    return 3
+
+
+def discount_rewards(rewards, gamma=0.9):
+    """Backward-propagate discounted rewards."""
+    disc = np.zeros(len(rewards))
+    running = 0.0
+    for t in reversed(range(len(rewards))):
+        running = rewards[t] + gamma * running
+        disc[t] = running
+    return disc
+
+
+def collect_rollout(env_name, n_steps=50, gamma=0.9):
+    """Play with heuristic, collect frames + discounted rewards."""
     env, config = make_env(env_name)
-    valid = list(config["actions"].keys())
     obs, _ = env.reset()
-    rollout = []
+    raw = []
     for _ in range(n_steps):
         frame = render_to_pil(env, scale=0.5)
         uri = pil_to_data_uri(frame)
-        action = 3  # gas mostly
+        action = carracing_heuristic(obs)
         obs, reward, t, tr, _ = env.step(action)
-        rollout.append({"frame_uri": uri, "good_action": 3})
+        raw.append({"frame_uri": uri,
+                     "action": action, "reward": reward})
         if t or tr:
             obs, _ = env.reset()
     env.close()
-    return rollout
+    rewards = [r["reward"] for r in raw]
+    disc = discount_rewards(rewards, gamma)
+    for i, r in enumerate(raw):
+        r["disc_reward"] = float(disc[i])
+    return raw
 
 
 def _build_msg(frame_uri, knowledge):
@@ -111,19 +139,25 @@ def _gen_pieces(pieces, gen, knowledge, reward):
 
 
 def _opt_step(rollout, pieces, cr, sess, api, model):
-    ex = random.choice(rollout)
+    # Only use positive-reward frames
+    pos = [e for e in rollout if e["disc_reward"] > 0]
+    if not pos:
+        pos = rollout
+    ex = random.choice(pos)
     sel = _sample(pieces) if pieces else []
     k = _build(pieces, sel) if sel else "none"
     lp = get_action_logprob(
         sess, api, model,
-        ex["frame_uri"], k, ex["good_action"])
+        ex["frame_uri"], k, ex["action"])
+    # Logprob only — reward filtering already selects good frames
+    score = lp
     sv = [1.0 if j in set(sel) else 0.0
           for j in range(len(pieces))]
-    cr.add(sv, lp)
+    cr.add(sv, score)
     cr.update(pieces)
     for j in sel:
         pieces[j].n_sel += 1
-    return lp, k
+    return score, k
 
 
 def optimize(rollout, pieces, sess, api, model,
@@ -151,6 +185,7 @@ def main():
     p.add_argument("--rollout-steps", type=int, default=30)
     p.add_argument("--opt-steps", type=int, default=100)
     p.add_argument("--gen-every", type=int, default=20)
+    p.add_argument("--gamma", type=float, default=0.9)
     args = p.parse_args()
 
     model = detect_model(args.api_base)
@@ -161,9 +196,11 @@ def main():
     sess = requests.Session()
     sess.headers["Authorization"] = "Bearer none"
 
-    print(f"Collecting {args.rollout_steps} rollout frames...")
-    rollout = collect_rollout(args.env, args.rollout_steps)
-    print(f"Collected {len(rollout)} frames")
+    print(f"Collecting {args.rollout_steps} frames (γ={args.gamma})...")
+    rollout = collect_rollout(args.env, args.rollout_steps, args.gamma)
+    acts = [r["action"] for r in rollout]
+    print(f"Collected {len(rollout)} frames, "
+          f"actions: {dict((a, acts.count(a)) for a in set(acts))}")
 
     pieces = [_Piece(s) for s in INITIAL_KNOWLEDGE]
     lm = dspy.LM(f"openai/{model}",
