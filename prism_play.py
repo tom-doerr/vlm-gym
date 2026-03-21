@@ -7,11 +7,13 @@ import time
 
 import dspy
 import numpy as np
+import requests
 
 from vlm_gym.envs import (
     detect_model, make_env, render_to_pil,
     GameDisplay, save_video, ENV_CONFIGS,
 )
+from vlm_gym.direct_agent import pil_to_data_uri
 from dspy.teleprompt.prism import (
     _Piece, _CreditModel, _sample, _build,
     _GenKnowledge, KnowledgePool, KnowledgePiece,

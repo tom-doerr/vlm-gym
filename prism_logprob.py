@@ -100,24 +100,19 @@ def get_action_logprob(session, api_base, model,
     return -10.0
 
 
-def _gen_pieces(pieces, gen, knowledge, reward,
-                gen_lm=None, env_desc=""):
+def _gen_pieces(pieces, gen, gen_lm, reward, env_desc):
     pool = KnowledgePool(items=[
         KnowledgePiece(content=p.content, beta=p.coef,
                        se=p.stderr, n=p.n_sel)
         for p in pieces])
-    rollout = (f"{env_desc}\n"
-               f"Score: logprob={reward:.2f}\n"
-               f"Knowledge used: {knowledge or 'none'}")
-    kw = {"pool": pool, "rollout": rollout}
-    if gen_lm:
-        kw["lm"] = gen_lm
+    rollout = f"{env_desc}\nScore: {reward:.2f}"
     try:
-        r = gen(**kw)
+        with dspy.context(lm=gen_lm):
+            r = gen(pool=pool, rollout=rollout)
         ext = {p.content for p in pieces}
-        for s in getattr(r.new_knowledge, 'items', []):
+        for s in (r.new_knowledge or []):
             s = str(s).strip()
-            if s and s not in ext:
+            if len(s) > 3 and s not in ext:
                 pieces.append(_Piece(s)); ext.add(s)
                 print(f"  [+] {s[:60]}")
     except Exception as e:
@@ -161,7 +156,7 @@ def optimize(rollout, pieces, sess, api, model,
             print(f"  step {i+1} lp={lp:.2f} "
                   f"best={best_lp:.2f} pool={len(pieces)}")
         if gen and (i+1) % gen_every == 0:
-            _gen_pieces(pieces, gen, k, lp, gen_lm, env_desc)
+            _gen_pieces(pieces, gen, gen_lm, lp, env_desc)
     return best_k, best_lp
 
 
@@ -202,7 +197,7 @@ def main():
     print(f"Gen model: {gen_model} @ {gen_base}")
     gen_lm = dspy.LM(f"openai/{gen_model}",
                   api_base=gen_base, api_key="none",
-                  max_tokens=500, temperature=0.7,
+                  max_tokens=1000, temperature=0.7,
                   extra_body={"chat_template_kwargs":
                               {"enable_thinking": False}})
     gen = dspy.Predict(_GenKnowledge)

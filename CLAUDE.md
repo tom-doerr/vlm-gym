@@ -19,7 +19,14 @@ VLM agents playing OpenAI Gymnasium environments via DSPy.
 
 ## Key Findings
 
-- Logprob PRISM >> reward-based optimizers for weak models
-- 0.8B ignores prompts with reward metric; logprobs work
+- **Lasso→Ridge fix** was root cause of β=0 in all PRISM runs.
+  Lasso (L1) zeroed small effects; Ridge (L2) preserves them.
+  PRISM now defaults to `reg="ridge"` (configurable).
+- Both reward-based and logprob-based PRISM work with Ridge.
+  Reward: β≈+0.09 on CarRacing. Logprob: β≈+0.24.
+- Logprob metric more sensitive (detects piece effects even
+  when argmax action unchanged). Reward works too.
+- `_GenKnowledge` output simplified to `list[str]` (was nested
+  Pydantic `NewKnowledge` model that small models couldn't produce)
 - `enable_thinking: False` disables Qwen3.5 thinking mode
 - DSPy fork from `~/git/dspy` (custom branch) for PRISM
