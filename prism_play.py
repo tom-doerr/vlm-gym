@@ -48,6 +48,8 @@ def play_episode(env_name, predict, pieces, credit,
     obs, _ = env.reset()
     disp = GameDisplay(title=f"PRISM: {env_name}") if display else None
     total, frames, start = 0.0, [], time.time()
+    sv_buf, rw_buf = [], []  # selection vectors + raw rewards
+    gamma = 0.9
 
     print(f"\n{'='*50}")
     print(f"PRISM: {env_name} | pool={len(pieces)} pieces")
@@ -76,13 +78,20 @@ def play_episode(env_name, predict, pieces, credit,
         obs, reward, t, tr, _ = env.step(action)
         total += reward
 
-        # PRISM: update credit
+        # PRISM: buffer selection + reward
         sv = [1.0 if i in set(sel) else 0.0
               for i in range(len(pieces))]
-        credit.add(sv, reward)
-        credit.update(pieces)
+        sv_buf.append(sv)
+        rw_buf.append(reward)
         for i in sel:
             pieces[i].n_sel += 1
+
+        # Refit with discounted returns every step
+        from prism_logprob import discount_rewards
+        dr = discount_rewards(rw_buf, gamma)
+        credit.X = sv_buf[:]
+        credit.y = dr.tolist()
+        credit.update(pieces)
 
         name = config["actions"].get(action, "?")
         print(f"Step {step:3d} | {name} | "
@@ -121,17 +130,20 @@ def _do_gen(pieces, gen, knowledge, reward, gen_lm):
         for p in pieces])
     kw = {"pool": pool,
           "rollout": f"r={reward:.1f} k={knowledge}"}
-    if gen_lm:
-        kw["lm"] = gen_lm
     try:
-        r = gen(**kw)
-        new = getattr(r.new_knowledge, 'items', [])
+        if gen_lm:
+            with dspy.context(lm=gen_lm):
+                r = gen(**kw)
+        else:
+            r = gen(**kw)
+        new = r.new_knowledge if isinstance(
+            r.new_knowledge, list) else []
         ext = {p.content for p in pieces}
         for s in new:
             s = str(s).strip()
-            if s and s not in ext:
+            if len(s) > 3 and s not in ext:
                 pieces.append(_Piece(s)); ext.add(s)
-                print(f"  [PRISM] +piece: {s[:60]}")
+                print(f"  [+] {s[:60]}")
     except Exception as e:
         log.warning(f"Gen: {e}")
 
@@ -145,6 +157,7 @@ def main():
     p.add_argument("--max-steps", type=int, default=100)
     p.add_argument("--gen-every", type=int, default=15)
     p.add_argument("--no-display", action="store_true")
+    p.add_argument("--gen-api-base", default=None)
     args = p.parse_args()
 
     model = detect_model(args.api_base)
@@ -158,6 +171,15 @@ def main():
     )
     dspy.configure(lm=lm)
 
+    gb = args.gen_api_base or args.api_base
+    gm = detect_model(gb)
+    print(f"Gen model: {gm} @ {gb}")
+    gen_lm = dspy.LM(
+        f"openai/{gm}", api_base=gb, api_key="none",
+        max_tokens=1000, temperature=0.7,
+        extra_body={
+            "chat_template_kwargs": {"enable_thinking": False}})
+
     predict = dspy.Predict(GameAction)
     pieces = [_Piece(s) for s in INITIAL_KNOWLEDGE]
     credit = _CreditModel()
@@ -166,7 +188,7 @@ def main():
     play_episode(
         args.env, predict, pieces, credit, gen,
         args.gen_every, args.max_steps,
-        not args.no_display, gen_lm=None,
+        not args.no_display, gen_lm=gen_lm,
     )
 
 
