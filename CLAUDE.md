@@ -12,8 +12,12 @@ VLM agents playing OpenAI Gymnasium environments via DSPy.
 ## Optimization
 
 - `optimize.py` — MIPROv2/SIMBAT (`--optimizer`, `--env`)
-- `prism_play.py` — Online PRISM (Thompson-sampled knowledge)
-- `prism_logprob.py` — **Best**: offline PRISM + logprobs
+- `prism_play.py` — Online PRISM with discounted reward propagation
+  - Multi-episode: resets env when ep_reward < -10, keeps pool
+  - Buffers (selection_vector, reward), refits Ridge with γ=0.9
+    discounted returns every step
+  - `--gen-api-base` for separate gen model (122B recommended)
+- `prism_logprob.py` — Offline PRISM + logprobs
   - β=+1.12 for "press gas" → reward -13 → +121
 - `run_prism_optimized.py` — Run with optimized knowledge
 
@@ -28,5 +32,9 @@ VLM agents playing OpenAI Gymnasium environments via DSPy.
   when argmax action unchanged). Reward works too.
 - `_GenKnowledge` output simplified to `list[str]` (was nested
   Pydantic `NewKnowledge` model that small models couldn't produce)
+- Discounted reward propagation (γ=0.9) gives 7x more β
+  differentiation than raw per-step reward
+- 122B gen produces high-quality racing tips; 0.8B gen fails
+  on structured output but works with `list[str]`
 - `enable_thinking: False` disables Qwen3.5 thinking mode
 - DSPy fork from `~/git/dspy` (custom branch) for PRISM

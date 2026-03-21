@@ -42,14 +42,15 @@ INITIAL_KNOWLEDGE = [
 
 
 def play_episode(env_name, predict, pieces, credit,
-                 gen, gen_every, max_steps, display, gen_lm):
+                 gen, gen_every, max_steps, display, gen_lm,
+                 reset_threshold=-10, gamma=0.9):
     env, config = make_env(env_name)
     valid = list(config["actions"].keys())
     obs, _ = env.reset()
     disp = GameDisplay(title=f"PRISM: {env_name}") if display else None
     total, frames, start = 0.0, [], time.time()
-    sv_buf, rw_buf = [], []  # selection vectors + raw rewards
-    gamma = 0.9
+    sv_buf, rw_buf = [], []
+    ep_reward, ep_num = 0.0, 1
 
     print(f"\n{'='*50}")
     print(f"PRISM: {env_name} | pool={len(pieces)} pieces")
@@ -77,6 +78,7 @@ def play_episode(env_name, predict, pieces, credit,
 
         obs, reward, t, tr, _ = env.step(action)
         total += reward
+        ep_reward += reward
 
         # PRISM: buffer selection + reward
         sv = [1.0 if i in set(sel) else 0.0
@@ -94,16 +96,22 @@ def play_episode(env_name, predict, pieces, credit,
         credit.update(pieces)
 
         name = config["actions"].get(action, "?")
-        print(f"Step {step:3d} | {name} | "
-              f"r={reward:+.1f} total={total:+.1f} | "
-              f"knowledge={len(sel)} pieces")
+        print(f"Step {step:3d} ep{ep_num} | {name} | "
+              f"r={reward:+.1f} ep={ep_reward:+.1f} "
+              f"total={total:+.1f} | "
+              f"pool={len(pieces)}")
 
         # PRISM: generate new knowledge
         if gen and (step+1) % gen_every == 0:
             _do_gen(pieces, gen, knowledge, reward, gen_lm)
 
-        if t or tr:
-            break
+        # Reset episode if done or reward too low
+        if t or tr or ep_reward < reset_threshold:
+            print(f"  [reset] ep{ep_num} done, "
+                  f"ep_reward={ep_reward:+.1f}")
+            ep_num += 1
+            ep_reward = 0.0
+            obs, _ = env.reset()
 
     elapsed = time.time() - start
     print(f"\nDone: {step+1} steps, reward={total:+.1f}, "
