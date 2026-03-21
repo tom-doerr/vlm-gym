@@ -28,28 +28,7 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
 
-INITIAL_KNOWLEDGE = [
-    "If the road curves left, steer left (action 1)",
-    "If the road curves right, steer right (action 2)",
-    "On straight road, press gas (action 3)",
-    "Brake before sharp turns (action 4)",
-    "Stay on the dark gray road surface",
-    "Action 3 is gas — use it to move forward",
-]
-
-
-def carracing_heuristic(obs):
-    """Steer toward road center, gas on straight."""
-    row = obs[66]
-    road = np.where(row[:, 1] > 100)[0]
-    if len(road) < 5:
-        return 3
-    center = (road[0] + road[-1]) / 2
-    if center < 42:
-        return 1
-    elif center > 54:
-        return 2
-    return 3
+INITIAL_KNOWLEDGE = []
 
 
 def discount_rewards(rewards, gamma=0.9):
@@ -70,7 +49,8 @@ def collect_rollout(env_name, n_steps=50, gamma=0.9):
     for _ in range(n_steps):
         frame = render_to_pil(env, scale=0.5)
         uri = pil_to_data_uri(frame)
-        action = carracing_heuristic(obs)
+        valid = list(config["actions"].keys())
+        action = random.choice(valid)
         obs, reward, t, tr, _ = env.step(action)
         raw.append({"frame_uri": uri,
                      "action": action, "reward": reward})
@@ -120,14 +100,20 @@ def get_action_logprob(session, api_base, model,
     return -10.0
 
 
-def _gen_pieces(pieces, gen, knowledge, reward):
+def _gen_pieces(pieces, gen, knowledge, reward,
+                gen_lm=None, env_desc=""):
     pool = KnowledgePool(items=[
         KnowledgePiece(content=p.content, beta=p.coef,
                        se=p.stderr, n=p.n_sel)
         for p in pieces])
+    rollout = (f"{env_desc}\n"
+               f"Score: logprob={reward:.2f}\n"
+               f"Knowledge used: {knowledge or 'none'}")
+    kw = {"pool": pool, "rollout": rollout}
+    if gen_lm:
+        kw["lm"] = gen_lm
     try:
-        r = gen(pool=pool,
-                rollout=f"logprob={reward:.2f} k={knowledge}")
+        r = gen(**kw)
         ext = {p.content for p in pieces}
         for s in getattr(r.new_knowledge, 'items', []):
             s = str(s).strip()
@@ -151,17 +137,19 @@ def _opt_step(rollout, pieces, cr, sess, api, model):
         ex["frame_uri"], k, ex["action"])
     # Logprob only — reward filtering already selects good frames
     score = lp
-    sv = [1.0 if j in set(sel) else 0.0
-          for j in range(len(pieces))]
-    cr.add(sv, score)
-    cr.update(pieces)
+    if pieces:
+        sv = [1.0 if j in set(sel) else 0.0
+              for j in range(len(pieces))]
+        cr.add(sv, score)
+        cr.update(pieces)
     for j in sel:
         pieces[j].n_sel += 1
     return score, k
 
 
 def optimize(rollout, pieces, sess, api, model,
-             steps=100, gen=None, gen_every=20):
+             steps=100, gen=None, gen_every=20,
+             gen_lm=None, env_desc=""):
     cr = _CreditModel()
     best_lp, best_k = -math.inf, ""
     for i in range(steps):
@@ -171,9 +159,9 @@ def optimize(rollout, pieces, sess, api, model,
             best_lp, best_k = lp, k
         if (i+1) % 10 == 0:
             print(f"  step {i+1} lp={lp:.2f} "
-                  f"best={best_lp:.2f}")
+                  f"best={best_lp:.2f} pool={len(pieces)}")
         if gen and (i+1) % gen_every == 0:
-            _gen_pieces(pieces, gen, k, lp)
+            _gen_pieces(pieces, gen, k, lp, gen_lm, env_desc)
     return best_k, best_lp
 
 
@@ -186,6 +174,8 @@ def main():
     p.add_argument("--opt-steps", type=int, default=100)
     p.add_argument("--gen-every", type=int, default=20)
     p.add_argument("--gamma", type=float, default=0.9)
+    p.add_argument("--gen-api-base", default=None,
+                    help="separate endpoint for knowledge gen")
     args = p.parse_args()
 
     model = detect_model(args.api_base)
@@ -203,18 +193,30 @@ def main():
           f"actions: {dict((a, acts.count(a)) for a in set(acts))}")
 
     pieces = [_Piece(s) for s in INITIAL_KNOWLEDGE]
-    lm = dspy.LM(f"openai/{model}",
+    dspy.configure(lm=dspy.LM(f"openai/{model}",
                   api_base=args.api_base, api_key="none",
+                  max_tokens=100, temperature=0))
+    # Use separate LM for knowledge generation
+    gen_base = args.gen_api_base or args.api_base
+    gen_model = detect_model(gen_base)
+    print(f"Gen model: {gen_model} @ {gen_base}")
+    gen_lm = dspy.LM(f"openai/{gen_model}",
+                  api_base=gen_base, api_key="none",
                   max_tokens=500, temperature=0.7,
                   extra_body={"chat_template_kwargs":
                               {"enable_thinking": False}})
-    dspy.configure(lm=lm)
     gen = dspy.Predict(_GenKnowledge)
 
     print(f"Optimizing {args.opt_steps} steps...")
+    config = ENV_CONFIGS[args.env]
+    acts = " ".join(f"{k}={v}" for k, v in config["actions"].items())
+    env_desc = (f"Game: {config['id']} — {config['goal']}\n"
+                f"Actions: {acts}")
+    print(f"Env: {env_desc}")
+
     best_k, best_lp = optimize(
         rollout, pieces, sess, api, model,
-        args.opt_steps, gen, args.gen_every)
+        args.opt_steps, gen, args.gen_every, gen_lm, env_desc)
 
     print(f"\nBest logprob: {best_lp:.3f}")
     print(f"Best knowledge:\n{best_k}")
