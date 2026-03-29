@@ -15,12 +15,17 @@ def main():
                     default="http://192.168.110.2:8000/v1")
     p.add_argument("--api-key", default="none")
     p.add_argument("--episodes", type=int, default=1)
-    p.add_argument("--max-steps", type=int, default=None)
+    p.add_argument("--max-steps", type=int, default=None,
+                    help="maximum steps per episode; use 0 for no cap")
     p.add_argument("--temperature", type=float, default=0.7)
     p.add_argument("--save-dir", default="episodes")
     p.add_argument("--no-display", action="store_true")
     p.add_argument("--direct", action="store_true",
                     help="single-token mode (no DSPy, min latency)")
+    p.add_argument("--no-cot", action="store_true",
+                    help="disable DSPy Chain-of-Thought wrapper")
+    p.add_argument("--history-steps", type=int, default=10,
+                    help="number of prior action/reward steps to include in DSPy history")
     p.add_argument("--no-video", action="store_true",
                     help="disable automatic video recording")
     args = p.parse_args()
@@ -36,6 +41,8 @@ def main():
         agent = VLMAgent(
             "openai/" + raw_model, args.api_base,
             args.api_key, args.temperature,
+            cot=not args.no_cot,
+            history_steps=args.history_steps,
         )
     import time as _t
     for ep in range(args.episodes):

@@ -77,7 +77,8 @@ class DirectAgent:
                     save_dir=None, verbose=True, display=True,
                     video_path=None):
         env, config = make_env(env_name)
-        max_steps = max_steps or config["max_steps"]
+        if max_steps is None:
+            max_steps = config["max_steps"]
         action_space = config["actions"]
         obs, info = env.reset()
         history, total_reward = [], 0.0
@@ -91,7 +92,8 @@ class DirectAgent:
             print(f"\n{'='*50}")
             print(f"[direct] {env_name} | {config['goal']}")
             print(f"{'='*50}\n")
-        for step in range(max_steps):
+        step = 0
+        while max_steps == 0 or step < max_steps:
             frame = render_to_pil(env, scale=1.0)
             if vid_frames is not None:
                 vid_frames.append(frame.copy())
@@ -118,6 +120,7 @@ class DirectAgent:
                       f" | {dt:.2f}s | tok={tok}")
             if term or trunc:
                 break
+            step += 1
         elapsed = time.time() - start
         if verbose:
             print(f"\nDone: {len(history)} steps, "
@@ -140,4 +143,3 @@ class DirectAgent:
         env.close()
         return {"env": env_name, "steps": len(history),
                 "total_reward": total_reward}
-
